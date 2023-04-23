@@ -23,3 +23,7 @@ Ensure the following files are in your directory.
 
 ## How to run
 1. Run the main.py file to use the application
+2. Press 'd' to toggle drawing. Drawing will be enabled by default at the start.
+3. Press 'c' to clear the canvas.
+4. Press 's' to save canvas image as training data. Enter the text (true label) of that image.
+5. This image will be saved as a file and add an entry to `custom_data.csv` file
