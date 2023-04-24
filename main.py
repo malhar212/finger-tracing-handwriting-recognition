@@ -54,9 +54,9 @@ def draw_finger_tracing(img, canvas, results, prev_x, prev_y, frame_count, fps, 
                 frame_count += 1
 
             # If the finger has not moved enough for more than 30 frames, stop drawing lines, stop tracking
-            if frame_count > fps / 3:
-                tracking = False
-                cx, cy = 0, 0
+            # if frame_count > fps:
+            #     tracking = False
+            #     cx, cy = 0, 0
     return cx, cy, frame_count, tracking
 
 
@@ -73,7 +73,53 @@ def process_image(img):
 
 
 def clearCanvas(image):
-    return np.zeros(image.shape) + 255
+    return np.zeros(image.shape, dtype=np.uint8) + 255
+
+
+def calc_contours(image):
+    # Invert the image using bitwise not operation
+    inverted_image = cv2.bitwise_not(image)
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(inverted_image, cv2.COLOR_BGR2GRAY)
+    # Threshold the image to create a binary image
+    ret, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+    # Calculate the bounding box that encloses all contours
+    x_min, y_min = np.inf, np.inf
+    x_max, y_max = -np.inf, -np.inf
+
+    # Find contours in the binary image
+    contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        for point in contour:
+            x, y = point[0]
+            x_min = min(x_min, x)
+            y_min = min(y_min, y)
+            x_max = max(x_max, x)
+            y_max = max(y_max, y)
+    contour = max(contours, key=lambda cnt: cv2.contourArea(cnt))
+    return contour, (x_min, y_min, x_max - x_min, y_max - y_min)
+
+
+def crop_to_content(image):
+    contour, bounding_box = calc_contours(image)
+    # Compute the oriented bounding box
+    rect = cv2.minAreaRect(contour)
+
+    # Get the rotation angle
+    angle = rect[2]
+
+    # Rotate the entire image
+    rows, cols = rect[0]  # Center of bounding box
+    obb_center = (int(rows), int(cols))
+    M = cv2.getRotationMatrix2D(obb_center, angle - 90 if angle > 45 else angle, 1.0)
+    rotated_image = cv2.warpAffine(image, M, image.shape[1::-1], borderValue=(255, 255, 255))
+
+    # Crop the rotated image to the bounding rectangle
+    padding = 2
+    contour, bounding_box = calc_contours(rotated_image)
+    x, y, w, h = bounding_box
+    cropped = rotated_image[y - padding:y + h + 2 * padding, x - padding:x + w + 2 * padding]
+    return cropped
 
 
 def main():
@@ -116,10 +162,10 @@ def main():
                             (150, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
             else:
                 finger_detect_delay_count = 0
-        else:
-            # Start re-tracking only after hand has exited then re-entered the frame
-            if not results.multi_hand_landmarks:
-                tracking = True
+        # else:
+        #     # Start re-tracking only after hand has exited then re-entered the frame
+        #     if not results.multi_hand_landmarks:
+        #         tracking = True
         cv2.putText(image,
                     f"Tracking: {tracking}",
                     (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
@@ -130,8 +176,10 @@ def main():
         key = cv2.waitKey(1)
         # Implements toggle functionality
         if key == temp:
+            # toggle drawing
             if key == ord('d'):
-                tracking = True
+                # tracking = not tracking
+                finger_detect_delay_count = 0
             key = 0
         if key == -1:
             key = temp
@@ -141,41 +189,46 @@ def main():
             cv2.destroyAllWindows()
 
         if key == ord('s'):
-            # Wait for label input
-            previewImage = canvas.copy()
-            label = ""
-            while True:
-                cv2.putText(previewImage,
-                            "Enter the text in the image and hit 'Enter' or 'Esc' key for training.",
-                            (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
-                cv2.putText(previewImage, "Label: " + label, (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
-                            cv2.LINE_AA)
-                cv2.imshow("Add Label", previewImage)
-                d = cv2.waitKey(0)
-                if d == 13:  # 'Enter' key
-                    filename = f'{label}.jpg'
-                    count = 1
-                    while os.path.exists(filename):
-                        # Append "_count" to the file name
-                        filename = f"{label}_{count}.jpg"
-                        count += 1
-                    with open("custom_data.csv", mode="a", newline='') as file:
-                        writer = csv.writer(file)
-                        writer.writerow([filename, label])
-                    cv2.imwrite(filename, canvas)
-                    cv2.destroyWindow("Add Label")
-                    break
-                elif d == 27:  # 'Esc' key
-                    cv2.destroyWindow("Add Label")
-                    break
-                else:
-                    label += chr(d)
+            handle_image_save(canvas)
         if key == ord('c'):
             canvas = clearCanvas(image)
 
         # Avoid removal of filter by other keyinputs
         if key != 0 and key != ord('d'):
             key = temp
+
+
+def handle_image_save(canvas):
+    # Wait for label input
+    previewImage = canvas.copy()
+    label = ""
+    while True:
+        cv2.putText(previewImage,
+                    "Enter the text in the image and hit 'Enter' or 'Esc' key for training.",
+                    (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(previewImage, "Label: " + label, (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                    cv2.LINE_AA)
+        cv2.imshow("Add Label", previewImage)
+        d = cv2.waitKey(0)
+        if d == 13:  # 'Enter' key
+            filename = f'{label}.jpg'
+            count = 1
+            while os.path.exists(filename):
+                # Append "_count" to the file name
+                filename = f"{label}_{count}.jpg"
+                count += 1
+            with open("custom_data.csv", mode="a", newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([filename, label])
+            canvas = crop_to_content(canvas)
+            cv2.imwrite(filename, canvas)
+            cv2.destroyWindow("Add Label")
+            break
+        elif d == 27:  # 'Esc' key
+            cv2.destroyWindow("Add Label")
+            break
+        else:
+            label += chr(d)
 
 
 # Press the green button in the gutter to run the script.
