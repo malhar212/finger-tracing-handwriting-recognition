@@ -217,7 +217,7 @@ def main():
             if temp == ord('e'):
                 preview = canvas.copy()
                 preview = crop_to_content(preview)
-                cv2.imshow("Evaluate", previewImage)
+                cv2.imshow("Evaluate", preview)
                 string = ocr_model.predict(preview)
                 print(string)
         if key == ord('c'):
@@ -248,7 +248,7 @@ def handle_image_save(canvas):
                 os.makedirs(folder_path)
             filename = f'{label}.jpg'
             count = 1
-            while os.path.exists(filename):
+            while os.path.exists(folder_path + "/" +filename):
                 # Append "_count" to the file name
                 filename = f"{label}_{count}.jpg"
                 count += 1
@@ -257,7 +257,7 @@ def handle_image_save(canvas):
                 writer.writerow([folder_path + "/" +filename, label])
             canvas = crop_to_content(canvas)
             cv2.imshow("Add Label", previewImage)
-            cv2.imwrite(folder_path + "/" +filename, canvas)
+            cv2.imwrite(folder_path + "/" + filename, canvas)
             cv2.destroyWindow("Add Label")
             break
         elif d == 27:  # 'Esc' key
