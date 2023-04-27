@@ -1,9 +1,11 @@
+# CS 5330
+# Malhar Mahant & Kruthika Gangaraju & Sriram Kodeeswaran
+# Final Project: Handwriting gesture detection and recognition
 import cv2
 import torch
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-import gc
 
-
+# Class that loads the specified model from file and provides helper method for inference
 class MyTrOCRModel:
     def __init__(self, trained_checkpoint="microsoft/trocr-base-handwritten"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -13,6 +15,7 @@ class MyTrOCRModel:
         self.model.to(self.device)
         self.model_configurator()
 
+    # Helper method to set model configurations
     def model_configurator(self):
         # set special tokens used for creating the decoder_input_ids from the labels
         self.model.config.decoder_start_token_id = self.processor.tokenizer.cls_token_id
@@ -28,23 +31,15 @@ class MyTrOCRModel:
         self.model.config.length_penalty = 2.0
         self.model.config.num_beams = 4
 
+    # Helper method to to obtain inference for a given image
     def predict(self, image):
         # prepare image (i.e. resize + normalize)
-        # image = Image.open(file_name).convert("RGB")
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         pixel_values = self.processor(image, return_tensors="pt").pixel_values
-        print(self.device)
-        print(pixel_values.shape)
-        # Convert pixel_values to a NumPy array
         pixel_values_np = pixel_values.squeeze().numpy()
-        pixel_values_np = pixel_values_np.transpose(1, 2, 0)
-        # Display the pixel values using matplotlib
-        cv2.imshow("C", pixel_values_np)
-        cv2.waitKey(0)
+        # Predict
         self.model.eval()
         with torch.no_grad():
             pred = self.model.generate(pixel_values.to(self.device))
-            print(pred.squeeze().shape)
             string = self.processor.batch_decode(pred, skip_special_tokens=True)
-            print(string)
         return string

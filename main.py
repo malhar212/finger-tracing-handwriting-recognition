@@ -8,6 +8,7 @@ import imutils
 import mediapipe as mp
 import csv
 import numpy as np
+import matplotlib.pyplot as plt
 
 from tr_ocr import MyTrOCRModel
 
@@ -16,12 +17,7 @@ hands = mpHands.Hands(max_num_hands=1)
 mpDraw = mp.solutions.drawing_utils
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Drawing finger tracing
+# Helper method for Drawing finger tracing
 def draw_finger_tracing(img, canvas, window_preview, results, prev_x, prev_y, frame_count, fps, draw_enabled):
     tracking = True
     cx, cy = 0, 0
@@ -51,7 +47,6 @@ def draw_finger_tracing(img, canvas, window_preview, results, prev_x, prev_y, fr
             else:
                 # If the finger has not moved enough, increment the counter
                 frame_count += 1
-
             # If the finger has not moved enough for more than 30 frames, stop drawing lines, stop tracking
             # if frame_count > fps:
             #     tracking = False
@@ -59,7 +54,7 @@ def draw_finger_tracing(img, canvas, window_preview, results, prev_x, prev_y, fr
     return cx, cy, frame_count, tracking
 
 
-# Processing the input image
+# Processing the input image and use Mediapipe library to obtain hand landmarks
 def process_image(img):
     # Flip for mirror image
     img = cv2.flip(img, 1)
@@ -71,10 +66,12 @@ def process_image(img):
     return results, img
 
 
+# Helper method to clear the drawing canvas
 def clearCanvas(image):
     return np.zeros(image.shape, dtype=np.uint8) + 255
 
 
+# Helper method to process and identify content location, orientation and bounding box in the image.
 def calc_contours(image, cluster=False):
     # Invert the image using bitwise not operation
     inverted_image = cv2.bitwise_not(image)
@@ -105,13 +102,13 @@ def calc_contours(image, cluster=False):
     return contour, (x_min, y_min, x_max-x_min, y_max-y_min)
 
 
+# Helper method to process and identify content location to crop the image to content and fix andy tilt.
 def crop_to_content(image):
     contour1, bounding_box_og = calc_contours(image, True)
     padding = 20
 
     # Compute the oriented bounding box
     rect = cv2.minAreaRect(contour1)
-    print(rect)
     x_min, y_min, height, width = bounding_box_og
     cv2.rectangle(image, (x_min-padding, y_min-padding), (x_min+height+padding, y_min+width+padding), (255, 255, 255), 2)
 
@@ -135,13 +132,74 @@ def crop_to_content(image):
     return cropped
 
 
+# Helper method to show the inference generated from the model
+def display_inference(ax, text):
+    ax.clear()  # Clear the plot
+    ax.set_axis_off()  # Hide the axes
+    ax.annotate(text, xy=(0, 1), xycoords="axes fraction", va="top", ha="right", fontsize=12)
+    plt.pause(0.1)
+
+
+# Helper method to handle image save in drawing mode
+def handle_image_save(canvas):
+    # Wait for label input
+    previewImage = canvas.copy()
+    label = ""
+    while True:
+        cv2.putText(previewImage,
+                    "Enter the text in the image and hit 'Enter' or 'Esc' key for training.",
+                    (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(previewImage, "Label: " + label, (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
+                    cv2.LINE_AA)
+        cv2.imshow("Add Label", previewImage)
+        d = cv2.waitKey(0)
+        # Accept input till user hits Enter or Esc
+        if d == 13:  # 'Enter' key
+            folder_path = "data"
+            # Check if the folder exists
+            if not os.path.exists(folder_path):
+                # If not, create the folder
+                os.makedirs(folder_path)
+            filename = f'{label}.jpg'
+            count = 1
+            while os.path.exists(folder_path + "/" + filename):
+                # Append "_count" to the file name
+                filename = f"{label}_{count}.jpg"
+                count += 1
+            with open("custom_data.csv", mode="a", newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([folder_path + "/" + filename, label])
+            canvas = crop_to_content(canvas)
+            cv2.imwrite(folder_path + "/" + filename, canvas)
+            cv2.destroyWindow("Add Label")
+            break
+        elif d == 27:  # 'Esc' key
+            cv2.destroyWindow("Add Label")
+            break
+        else:
+            label += chr(d)
+
+
+# Main method runs the air canvas application to draw using finger tracing and infer using the custom trained model.
 def main():
     # Replace 0 with the video path to use a
     # pre-recorded video
     cap = cv2.VideoCapture(0)
     canvas_name = 'Canvas'
-    cv2.namedWindow(canvas_name, cv2.WINDOW_AUTOSIZE)
-    ocr_model = 's'# MyTrOCRModel(trained_checkpoint="iam_word_trained_1")
+    hand_tracker = "Hand tracker"
+    cv2.namedWindow(canvas_name, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(hand_tracker, cv2.WINDOW_NORMAL)
+    # Load the OCR model
+    ocr_model = MyTrOCRModel(trained_checkpoint="custom_trained_model")
+
+    # Plot to display inferred text
+    fig = plt.figure()
+    ax = plt.gca()
+    ax.set_axis_off()
+
+    # Keeps track of inferred text
+    inferred_text = ""
+
     prev_x, prev_y = 0, 0
     frame_count = 0
     finger_detect_delay_count = 0
@@ -165,22 +223,22 @@ def main():
 
         results, image = process_image(image)
         if tracking:
+            # If hand in frame
             if results.multi_hand_landmarks:
                 if finger_detect_delay_count < 5:
                     finger_detect_delay_count += 1
-                # Enable drawing if the hand was detected for at least 5 frames and drawing mode is selected
+                # Enable drawing if the hand was detected for at least 5 frames and drawing mode or evaluation mode
+                # is selected
                 draw_enabled = finger_detect_delay_count >= 5 and (key == ord('d') or key == ord('e'))
                 window_preview = canvas.copy()
                 prev_x, prev_y, frame_count, tracking = draw_finger_tracing(image, canvas, window_preview, results,
                                                                             prev_x, prev_y, frame_count, fps,
                                                                             draw_enabled)
-                if key == ord('d'):
-                    cv2.putText(image,
-                            f"Drawing: {draw_enabled}",
-                            (150, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
+                status_string = f"Drawing: {draw_enabled}" 
                 if key == ord('e'):
-                    cv2.putText(image,
-                            f"Drawing: {draw_enabled}, Evaluation mode ",
+                    status_string += ", Evaluation mode"
+                cv2.putText(image,
+                            status_string,
                             (150, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
             else:
                 finger_detect_delay_count = 0
@@ -191,14 +249,21 @@ def main():
         cv2.putText(image,
                     f"Tracking: {tracking}",
                     (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
+        
+        # h, w, c = image.shape
+        # cv2.resizeWindow(hand_tracker, w*2, h*2)
+        # cv2.resizeWindow(canvas_name, w*2, h*2)
+
         # Displaying the output
-        cv2.imshow("Hand tracker", image)
+        cv2.imshow(hand_tracker, image)
         cv2.imshow(canvas_name, window_preview)
+
         temp = key
         key = cv2.waitKey(1)
+
         # Implements toggle functionality
         if key == temp:
-            # toggle drawing
+            # toggle drawing or
             if key == ord('d') or key == ord('e'):
                 # tracking = not tracking
                 # draw_enabled = not draw_enabled
@@ -206,65 +271,47 @@ def main():
             key = 0
         if key == -1:
             key = temp
+
         # Program terminates when q key is pressed
         if key == ord('q'):
             cap.release()
             cv2.destroyAllWindows()
+            plt.close('all')
+            break
 
+        # Start saving or evaluating the canvas
         if key == ord('s'):
+            # If drawing mode initiate saving to training data
             if temp == ord('d'):
                 handle_image_save(canvas)
+            # If evaluation mode use image to predict
             if temp == ord('e'):
                 preview = canvas.copy()
+                # cv2.imshow("Copy", preview)
+                # cv2.waitKey(0)
                 preview = crop_to_content(preview)
-                cv2.imshow("Evaluate", preview)
+                # cv2.imshow("Crop", preview)
+                # cv2.waitKey(0)
                 string = ocr_model.predict(preview)
-                print(string)
+                print(string[0])
+                inferred_text += string[0] + "\n"
+                display_inference(ax, inferred_text)
+                # cv2.destroyWindow("Copy")
+                # cv2.destroyWindow("Crop")
+
+        # Clear canvas
         if key == ord('c'):
             canvas = clearCanvas(image)
             window_preview = canvas.copy()
+
+        # Clear the displayed inference text
+        if key == ord('f'):
+            inferred_text = ""
+            display_inference(ax, inferred_text)
+
         # Avoid removal of filter by other keyinputs
         if key != 0 and key != ord('d') and key != ord('e'):
             key = temp
-
-
-def handle_image_save(canvas):
-    # Wait for label input
-    previewImage = canvas.copy()
-    label = ""
-    while True:
-        cv2.putText(previewImage,
-                    "Enter the text in the image and hit 'Enter' or 'Esc' key for training.",
-                    (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2, cv2.LINE_AA)
-        cv2.putText(previewImage, "Label: " + label, (200, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2,
-                    cv2.LINE_AA)
-        cv2.imshow("Add Label", previewImage)
-        d = cv2.waitKey(0)
-        if d == 13:  # 'Enter' key
-            folder_path = "data"
-            # Check if the folder exists
-            if not os.path.exists(folder_path):
-                # If not, create the folder
-                os.makedirs(folder_path)
-            filename = f'{label}.jpg'
-            count = 1
-            while os.path.exists(folder_path + "/" +filename):
-                # Append "_count" to the file name
-                filename = f"{label}_{count}.jpg"
-                count += 1
-            with open("custom_data.csv", mode="a", newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow([folder_path + "/" +filename, label])
-            canvas = crop_to_content(canvas)
-            cv2.imshow("Add Label", previewImage)
-            cv2.imwrite(folder_path + "/" + filename, canvas)
-            cv2.destroyWindow("Add Label")
-            break
-        elif d == 27:  # 'Esc' key
-            cv2.destroyWindow("Add Label")
-            break
-        else:
-            label += chr(d)
 
 
 # Press the green button in the gutter to run the script.
