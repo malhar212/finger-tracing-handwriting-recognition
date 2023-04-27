@@ -34,8 +34,10 @@ Ensure the following files are in your directory.
 ```
 
 ## Model training and testing
-Please open the python notebook `tr_ocr_experiments.ipynb` using a compatible software to view or run the model creation, training and testing code. 
-Please note this requires additional files for the testing data available in data folder in the link mentioned above
+Please open the python notebook `tr_ocr_experiments.ipynb` using a compatible software to view or run the model creation, training and testing code. <br>
+Please note this requires additional files for the testing data available in data folder in the link mentioned above. <br>
+Results in the notebook may vary slightly.
+
 
 ## How to run & use
 1. Run the main.py file to use the application
